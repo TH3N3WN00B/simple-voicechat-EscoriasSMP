@@ -14,13 +14,9 @@ buildscript {
 plugins {
     id 'org.quiltmc.loom' version "${quilt_loom_version}"
     id 'com.gradleup.shadow' version "${shadow_version}"
-    id 'de.maxhenkel.cursegradle' version "${cursegradle_version}"
-    id 'com.modrinth.minotaur' version "${minotaur_version}"
-    id 'mod-update' version "${mod_update_version}"
 }
 
 apply from: "https://raw.githubusercontent.com/henkelmax/mod-gradle-scripts/${mod_gradle_script_version}/mod.gradle"
-apply from: "https://raw.githubusercontent.com/henkelmax/mod-gradle-scripts/${mod_gradle_script_version}/taskutils.gradle"
 
 loom {
     interfaceInjection {
@@ -114,11 +110,4 @@ sourceSets {
 shadowJar {
     relocate 'io.github.jaredmdobson.concentus', 'de.maxhenkel.voicechat.concentus'
     exclude 'natives/*-x86/*'
-}
-
-tasks.register('uploadMod') {
-    group = 'voicechat'
-    doLast {
-        runGradleTasks(['clean'], ['curseforge', 'modrinth', 'modUpdate'])
-    }
 }
