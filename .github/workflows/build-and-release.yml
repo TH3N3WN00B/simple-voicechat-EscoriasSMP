@@ -1,0 +1,57 @@
+name: Build & Release
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+      - '[0-9]*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build root modules (Fabric, Forge, NeoForge, Paper) and run tests
+        run: ./gradlew build --console=plain
+      - name: Build Quilt
+        working-directory: quilt
+        run: ./gradlew build --console=plain
+      - name: Collect jars
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          for dir in fabric/build/libs forge/build/libs neoforge/build/libs paper/build/libs quilt/build/libs; do
+            if [ -d "$dir" ]; then
+              find "$dir" -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' -exec cp -f {} artifacts/ \;
+            fi
+          done
+          ls -la artifacts
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: simple-voicechat-EscoriasSMP-${{ github.run_id }}
+          path: artifacts/*.jar
+          if-no-files-found: error
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.jar
+          generate_release_notes: true
+          fail_on_unmatched_files: true
