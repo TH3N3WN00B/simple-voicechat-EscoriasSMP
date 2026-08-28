@@ -24,10 +24,13 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentUtils;
 import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.PermissionLevel;
 
 import javax.annotation.Nullable;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -197,7 +200,246 @@ public class VoicechatCommands {
             return 1;
         }));
 
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("create").then(Commands.argument("name", StringArgumentType.string()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            String name = StringArgumentType.getString(commandSource, "name");
+            return createGroupCommand(commandSource.getSource(), name, null);
+        }).then(Commands.argument("password", StringArgumentType.string()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            String name = StringArgumentType.getString(commandSource, "name");
+            String password = StringArgumentType.getString(commandSource, "password");
+            return createGroupCommand(commandSource.getSource(), name, password.isEmpty() ? null : password);
+        })))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("list").executes((commandSource) -> {
+            Server server = getServer(commandSource.getSource());
+            if (server == null) {
+                return 1;
+            }
+            for (Group group : server.getGroupManager().getGroups().values()) {
+                long members = server.getPlayerStateManager().getStates().stream().filter(state -> state.hasGroup() && group.getId().equals(state.getGroup())).count();
+                commandSource.getSource().sendSuccess(() -> Component.literal("- ").append(Component.literal(group.getName()).withStyle(ChatFormatting.GRAY)).append(Component.literal(" (%d%s)".formatted(members, group.getPassword() != null ? ", " + Component.translatable("message.voicechat.group_password_tag").getString() : ""))), false);
+            }
+            return 1;
+        })));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("kick").then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            return manageGroupMember(commandSource.getSource(), EntityArgument.getPlayer(commandSource, "target").getUUID(), 0);
+        }))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("promote").then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            return manageGroupMember(commandSource.getSource(), EntityArgument.getPlayer(commandSource, "target").getUUID(), 1);
+        }))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("demote").then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            return manageGroupMember(commandSource.getSource(), EntityArgument.getPlayer(commandSource, "target").getUUID(), 2);
+        }))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("transfer").then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            return manageGroupMember(commandSource.getSource(), EntityArgument.getPlayer(commandSource, "target").getUUID(), 3);
+        }))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("rename").then(Commands.argument("name", StringArgumentType.string()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            return manageGroupName(commandSource.getSource(), StringArgumentType.getString(commandSource, "name"), 4);
+        }))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("password").executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            return manageGroupName(commandSource.getSource(), null, 6);
+        }).then(Commands.argument("password", StringArgumentType.string()).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            String password = StringArgumentType.getString(commandSource, "password");
+            return manageGroupName(commandSource.getSource(), password.isEmpty() ? null : password, 6);
+        }))));
+
+        literalBuilder.then(Commands.literal("group").then(Commands.literal("delete").executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            Server server = getServer(commandSource.getSource());
+            if (server == null) {
+                return 1;
+            }
+            ServerPlayer source = commandSource.getSource().getPlayerOrException();
+            Group group = server.getGroupManager().getPlayerGroup(source);
+            if (group == null) {
+                commandSource.getSource().sendSuccess(() -> Component.translatable("message.voicechat.not_in_group"), false);
+                return 1;
+            }
+            server.getGroupManager().deleteGroup(source, group);
+            return 1;
+        })));
+
+        literalBuilder.then(Commands.literal("list").executes((commandSource) -> {
+            Server server = getServer(commandSource.getSource());
+            if (server == null) {
+                return 1;
+            }
+            MinecraftServer minecraftServer = server.getServer();
+            for (ServerPlayer player : minecraftServer.getPlayerList().getPlayers()) {
+                PlayerState state = server.getPlayerStateManager().getState(player.getUUID());
+                MutableComponent message = Component.literal("- ").append(player.getDisplayName());
+                if (state != null) {
+                    if (state.isMuted()) {
+                        message.append(" ").append(Component.translatable("message.voicechat.muted_tag").withStyle(ChatFormatting.DARK_RED));
+                    }
+                    if (state.isDisabled()) {
+                        message.append(" ").append(Component.translatable("message.voicechat.disabled_tag").withStyle(ChatFormatting.GRAY));
+                    }
+                    if (state.hasGroup()) {
+                        Group group = server.getGroupManager().getGroup(state.getGroup());
+                        if (group != null) {
+                            message.append(" ").append(Component.literal("[%s]".formatted(group.getName())).withStyle(ChatFormatting.GRAY));
+                        }
+                    }
+                }
+                if (!Voicechat.SERVER.isCompatible(player)) {
+                    message.append(" ").append(Component.translatable("message.voicechat.no_voicechat_tag").withStyle(ChatFormatting.DARK_RED));
+                }
+                commandSource.getSource().sendSuccess(() -> message, false);
+            }
+            return 1;
+        }));
+
+        literalBuilder.then(Commands.literal("mute").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ADMIN_PERMISSION)).then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
+            Server server = getServer(commandSource.getSource());
+            if (server == null) {
+                return 1;
+            }
+            ServerPlayer target = EntityArgument.getPlayer(commandSource, "target");
+            server.setServerMuted(target, true);
+            commandSource.getSource().sendSuccess(() -> Component.translatable("message.voicechat.mute_success", target.getName()), false);
+            return 1;
+        })));
+
+        literalBuilder.then(Commands.literal("unmute").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ADMIN_PERMISSION)).then(Commands.argument("target", EntityArgument.player()).executes((commandSource) -> {
+            Server server = getServer(commandSource.getSource());
+            if (server == null) {
+                return 1;
+            }
+            ServerPlayer target = EntityArgument.getPlayer(commandSource, "target");
+            server.setServerMuted(target, false);
+            commandSource.getSource().sendSuccess(() -> Component.translatable("message.voicechat.unmute_success", target.getName()), false);
+            return 1;
+        })));
+
+        literalBuilder.then(Commands.literal("announce").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ANNOUNCE_PERMISSION)).then(Commands.argument("message", StringArgumentType.greedyString()).executes((commandSource) -> {
+            Server server = getServer(commandSource.getSource());
+            if (server == null) {
+                return 1;
+            }
+            String message = StringArgumentType.getString(commandSource, "message");
+            String senderName = "Server";
+            try {
+                senderName = commandSource.getSource().getPlayerOrException().getName().getString();
+            } catch (CommandSyntaxException ignored) {
+            }
+            MinecraftServer minecraftServer = server.getServer();
+            Component announcement = Component.translatable("message.voicechat.announcement", Component.literal(senderName).withStyle(ChatFormatting.AQUA), Component.literal(message).withStyle(ChatFormatting.GOLD)).withStyle(ChatFormatting.BOLD);
+            minecraftServer.getPlayerList().broadcastSystemMessage(announcement, false);
+            minecraftServer.sendSystemMessage(announcement);
+            return 1;
+        })));
+
         dispatcher.register(literalBuilder);
+    }
+
+    private static int createGroupCommand(CommandSourceStack source, String name, @Nullable String password) throws CommandSyntaxException {
+        Server server = joinGroup(source);
+        if (server == null) {
+            return 1;
+        }
+        if (!Voicechat.GROUP_REGEX.matcher(name).matches()) {
+            source.sendFailure(Component.translatable("message.voicechat.invalid_group_name"));
+            return 1;
+        }
+        if (password != null && !Voicechat.GROUP_REGEX.matcher(password).matches()) {
+            source.sendFailure(Component.translatable("message.voicechat.invalid_group_name"));
+            return 1;
+        }
+        ServerPlayer player = source.getPlayerOrException();
+        server.getGroupManager().addGroup(new Group(UUID.randomUUID(), name, password, false, false, de.maxhenkel.voicechat.api.Group.Type.NORMAL, player.getUUID(), new HashSet<>()), player);
+        source.sendSuccess(() -> Component.translatable("message.voicechat.create_successful", Component.literal(name).withStyle(ChatFormatting.GRAY)), false);
+        return 1;
+    }
+
+    private static int manageGroupMember(CommandSourceStack source, UUID targetUuid, int op) throws CommandSyntaxException {
+        Server server = getServer(source);
+        if (server == null) {
+            return 1;
+        }
+        ServerPlayer actor = source.getPlayerOrException();
+        Group group = server.getGroupManager().getPlayerGroup(actor);
+        if (group == null) {
+            source.sendFailure(Component.translatable("message.voicechat.not_in_group"));
+            return 1;
+        }
+        switch (op) {
+            case 0:
+                server.getGroupManager().kickMember(actor, group, targetUuid);
+                break;
+            case 1:
+                server.getGroupManager().promoteMember(actor, group, targetUuid);
+                break;
+            case 2:
+                server.getGroupManager().demoteMember(actor, group, targetUuid);
+                break;
+            case 3:
+                server.getGroupManager().transferOwnership(actor, group, targetUuid);
+                break;
+        }
+        return 1;
+    }
+
+    private static int manageGroupName(CommandSourceStack source, @Nullable String name, int op) throws CommandSyntaxException {
+        Server server = getServer(source);
+        if (server == null) {
+            return 1;
+        }
+        ServerPlayer actor = source.getPlayerOrException();
+        Group group = server.getGroupManager().getPlayerGroup(actor);
+        if (group == null) {
+            source.sendFailure(Component.translatable("message.voicechat.not_in_group"));
+            return 1;
+        }
+        if (op == 4) {
+            server.getGroupManager().renameGroup(actor, group, name);
+        } else if (op == 6) {
+            server.getGroupManager().setGroupPassword(actor, group, name);
+        }
+        return 1;
+    }
+
+    private static Server getServer(CommandSourceStack source) {
+        Server server = Voicechat.SERVER.getServer();
+        if (server == null) {
+            source.sendSuccess(() -> Component.translatable("message.voicechat.voice_chat_unavailable"), false);
+            return null;
+        }
+        return server;
     }
 
     private static Server joinGroup(CommandSourceStack source) throws CommandSyntaxException {

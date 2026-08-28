@@ -19,6 +19,36 @@ A proximity voice chat for Minecraft with a variety of [addons](https://modrepo.
 :warning: **NOTE** This mod requires special setup on the server in order to work.
 Please read the [wiki](https://modrepo.de/minecraft/voicechat/wiki/setup) for more information.
 
+---
+
+## EscoriasSMP Fork
+
+This repository is a **fork** of [Simple Voice Chat](https://github.com/henkelmax/simple-voice-chat) (branch `1.21.11`) by [Max Henkel (henkelmax)](https://github.com/henkelmax), customized for the **EscoriasSMP** server.
+
+**All credit for the original mod goes to `henkelmax` and the Simple Voice Chat contributors.** This fork only adds a few changes on top of the original:
+
+### Changes in this fork
+
+- **Improved group management**: groups now have an *owner* and *administrators*. Owners and admins can
+  - promote/demote group members (`/voicechat group promote <player>` / `/voicechat group demote <player>`),
+  - kick members (`/voicechat group kick <player>`),
+  - transfer ownership (`/voicechat group transfer <player>`),
+  - rename the group (`/voicechat group rename <name>`),
+  - and change the group password after creation (`/voicechat group password <password>`).
+  No group member can be removed without the owner's or an admin's action.
+- **Server-side mute**: operators can mute a player with `/voicechat mute <player>` (their voice is ignored) and unmute them with `/voicechat unmute <player>`.
+- **Megaphone**: a wider, configurable voice range (`megaphone_distance` in the server config, `128` by default).
+  Bind the *Megaphone* key and hold it while talking to be heard further away than normal proximity voice.
+- **Admin announcements / broadcast**: operators holding the *Announce* key are heard by **everyone** on the server, including players inside groups or isolated rooms.
+  Requires the `voicechat.announce` permission (granted to operators by default).
+- **Announcement command**: `/voicechat announce <text>` sends an announcement to all players in chat.
+
+Everything else (proximity voice, groups, permissions, Opus/RNNoise, audio recording, etc.) works exactly like in the original Simple Voice Chat.
+
+**Original project:** https://github.com/henkelmax/simple-voice-chat
+
+---
+
 <p align="center">
     <a href="https://discord.gg/4dH2zwTmyX">
         <img src="assets/discord.svg" width="300">

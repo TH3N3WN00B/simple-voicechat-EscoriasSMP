@@ -17,12 +17,15 @@ import de.maxhenkel.voicechat.voice.client.ClientPlayerStateManager;
 import de.maxhenkel.voicechat.voice.client.MicrophoneActivationType;
 import de.maxhenkel.voicechat.voice.common.ClientGroup;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
+
+import java.util.UUID;
 
 public class GroupScreen extends VoiceChatScreenBase {
 
@@ -47,6 +50,7 @@ public class GroupScreen extends VoiceChatScreenBase {
     protected ToggleImageButton disable;
     protected ToggleImageButton showHUD;
     protected ImageButton leave;
+    protected Button manage;
 
     public GroupScreen(ClientGroup group) {
         super(TITLE, 236, 0);
@@ -95,6 +99,15 @@ public class GroupScreen extends VoiceChatScreenBase {
         });
         leave.setTooltip(Tooltip.create(LEAVE_GROUP));
         addRenderableWidget(leave);
+
+        UUID own = stateManager.getOwnID();
+        boolean canManage = group.isAdmin(own);
+        if (canManage) {
+            manage = Button.builder(Component.translatable("gui.voicechat.group.manage"), button -> {
+                minecraft.setScreen(new GroupManagementScreen(group));
+            }).bounds(guiLeft + 7 + (buttonSize + 3) * 3, buttonY, 52, buttonSize).build();
+            addRenderableWidget(manage);
+        }
 
         checkButtons();
     }

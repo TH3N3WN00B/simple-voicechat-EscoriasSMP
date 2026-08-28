@@ -76,6 +76,7 @@ public class NetworkMessage {
         packetRegistry.put((byte) 0x8, KeepAlivePacket.class);
         packetRegistry.put((byte) 0x9, ConnectionCheckPacket.class);
         packetRegistry.put((byte) 0xA, ConnectionCheckAckPacket.class);
+        packetRegistry.put((byte) 0xB, AnnouncementSoundPacket.class);
     }
 
     @Nullable

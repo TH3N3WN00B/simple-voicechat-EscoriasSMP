@@ -1,7 +1,9 @@
 package de.maxhenkel.voicechat.gui.group;
 
 import de.maxhenkel.voicechat.gui.widgets.ListScreenListBase;
+import de.maxhenkel.voicechat.voice.client.ClientGroupManager;
 import de.maxhenkel.voicechat.voice.client.ClientManager;
+import de.maxhenkel.voicechat.voice.common.ClientGroup;
 import de.maxhenkel.voicechat.voice.common.PlayerState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -29,6 +31,7 @@ public class GroupList extends ListScreenListBase<GroupEntry> {
             minecraft.setScreen(null);
             return;
         }
+        ClientGroup clientGroup = ClientManager.getGroupManager().getGroup(group);
         boolean changed = false;
         List<GroupEntry> toRemove = new LinkedList<>();
         for (GroupEntry entry : children()) {
@@ -50,7 +53,7 @@ public class GroupList extends ListScreenListBase<GroupEntry> {
         for (PlayerState state : playerStates) {
             if (isInGroup(state, group)) {
                 if (children().stream().noneMatch(groupEntry -> groupEntry.getState().getUuid().equals(state.getUuid()))) {
-                    addEntry(new GroupEntry(parent, state));
+                    addEntry(new GroupEntry(parent, state, clientGroup));
                     changed = true;
                 }
             }

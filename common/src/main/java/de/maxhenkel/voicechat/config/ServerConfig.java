@@ -14,6 +14,7 @@ public class ServerConfig {
     public ConfigEntry<String> voiceChatBindAddress;
     public ConfigEntry<Double> voiceChatDistance;
     public ConfigEntry<Double> whisperDistance;
+    public ConfigEntry<Double> megaphoneDistance;
     public ConfigEntry<Codec> voiceChatCodec;
     public ConfigEntry<Integer> voiceChatMtuSize;
     public ConfigEntry<Integer> tcpRateLimit;
@@ -56,6 +57,10 @@ public class ServerConfig {
         whisperDistance = builder
                 .doubleEntry("whisper_distance", 24D, 1D, 1_000_000D,
                         "The distance to which the voice can be heard when whispering"
+                );
+        megaphoneDistance = builder
+                .doubleEntry("megaphone_distance", 128D, 1D, 1_000_000D,
+                        "The distance to which the voice can be heard when using the megaphone"
                 );
         voiceChatCodec = builder
                 .enumEntry("codec", Codec.VOIP,

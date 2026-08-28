@@ -130,7 +130,7 @@ public class AudioChannel extends Thread {
                         ClientPluginManager.instance().onReceiveEntityClientSound(uuid, playerSoundPacket.getSender(), new short[0], playerSoundPacket.isWhispering(), playerSoundPacket.getDistance());
                     } else if (packet instanceof LocationSoundPacket locationSoundPacket) {
                         ClientPluginManager.instance().onReceiveLocationalClientSound(uuid, new short[0], locationSoundPacket.getLocation(), locationSoundPacket.getDistance());
-                    } else if (packet instanceof GroupSoundPacket) {
+                    } else if (packet instanceof GroupSoundPacket || packet instanceof AnnouncementSoundPacket) {
                         ClientPluginManager.instance().onReceiveStaticClientSound(uuid, new short[0]);
                     }
                     lastSequenceNumber = -1L;
@@ -212,6 +212,10 @@ public class AudioChannel extends Thread {
             short[] processedMonoData = ClientPluginManager.instance().onReceiveStaticClientSound(uuid, monoData);
             speaker.play(processedMonoData, volume, packet.getCategory());
             client.getTalkCache().updateLevel(uuid, category, false, processedMonoData);
+            appendRecording(() -> PositionalAudioUtils.convertToStereo(processedMonoData));
+        } else if (packet instanceof AnnouncementSoundPacket) {
+            short[] processedMonoData = ClientPluginManager.instance().onReceiveStaticClientSound(uuid, monoData);
+            speaker.play(processedMonoData, volume, packet.getCategory());
             appendRecording(() -> PositionalAudioUtils.convertToStereo(processedMonoData));
         } else if (packet instanceof PlayerSoundPacket soundPacket) {
             @Nullable Entity entity = minecraft.level.getPlayerByUUID(soundPacket.getSender());

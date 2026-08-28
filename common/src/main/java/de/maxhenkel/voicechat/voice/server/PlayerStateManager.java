@@ -158,6 +158,18 @@ public class PlayerStateManager {
         Voicechat.LOGGER.debug("Setting group of {}: {}", player.getName().getString(), state);
     }
 
+    public void setMuted(ServerPlayer player, boolean muted) {
+        PlayerState state = states.get(player.getUUID());
+        if (state == null) {
+            state = PlayerStateManager.defaultDisconnectedState(player);
+            Voicechat.LOGGER.debug("Defaulting to default state for {}: {}", player.getName().getString(), state);
+        }
+        state.setMuted(muted);
+        states.put(player.getUUID(), state);
+        broadcastState(player, state);
+        Voicechat.LOGGER.debug("Setting muted of {}: {}", player.getName().getString(), state);
+    }
+
     public Collection<PlayerState> getStates() {
         return states.values();
     }

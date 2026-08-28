@@ -6,16 +6,22 @@ import de.maxhenkel.voicechat.gui.volume.AdjustVolumeSlider;
 import de.maxhenkel.voicechat.gui.volume.PlayerVolumeEntry;
 import de.maxhenkel.voicechat.gui.widgets.ListScreenEntryBase;
 import de.maxhenkel.voicechat.voice.client.ClientManager;
+import de.maxhenkel.voicechat.voice.client.ClientPlayerStateManager;
 import de.maxhenkel.voicechat.voice.client.ClientVoicechat;
+import de.maxhenkel.voicechat.voice.common.ClientGroup;
 import de.maxhenkel.voicechat.voice.common.PlayerState;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.ARGB;
 import net.minecraft.world.entity.player.PlayerSkin;
+
+import java.util.UUID;
 
 public class GroupEntry extends ListScreenEntryBase<GroupEntry> {
 
@@ -29,12 +35,14 @@ public class GroupEntry extends ListScreenEntryBase<GroupEntry> {
     protected final Screen parent;
     protected final Minecraft minecraft;
     protected PlayerState state;
+    protected final ClientGroup group;
     protected final AdjustVolumeSlider volumeSlider;
 
-    public GroupEntry(Screen parent, PlayerState state) {
+    public GroupEntry(Screen parent, PlayerState state, ClientGroup group) {
         this.parent = parent;
         this.minecraft = Minecraft.getInstance();
         this.state = state;
+        this.group = group;
         this.volumeSlider = new AdjustVolumeSlider(0, 0, 100, 20, new PlayerVolumeEntry.AdjustPlayerVolumeEntry(state.getUuid(), state.getName()));
         this.children.add(volumeSlider);
     }
@@ -77,11 +85,48 @@ public class GroupEntry extends ListScreenEntryBase<GroupEntry> {
         Component name = Component.literal(state.getName());
         guiGraphics.drawString(minecraft.font, name, left + PADDING + outlineSize + PADDING, top + height / 2 - minecraft.font.lineHeight / 2, PLAYER_NAME_COLOR, false);
 
+        int nameWidth = PADDING + outlineSize + PADDING + minecraft.font.width(name) + PADDING;
+        if (group != null && group.isOwner(state.getUuid())) {
+            Component ownerTag = Component.translatable("message.voicechat.group_owner_tag").withStyle(ChatFormatting.GOLD);
+            guiGraphics.drawString(minecraft.font, ownerTag, left + nameWidth, top + height / 2 - minecraft.font.lineHeight / 2, ARGB.color(255, 255, 170, 0), false);
+        } else if (group != null && group.isAdmin(state.getUuid())) {
+            Component adminTag = Component.translatable("message.voicechat.group_admin_tag").withStyle(ChatFormatting.AQUA);
+            guiGraphics.drawString(minecraft.font, adminTag, left + nameWidth, top + height / 2 - minecraft.font.lineHeight / 2, ARGB.color(255, 85, 200, 255), false);
+        }
+
         if (hovered && !ClientManager.getPlayerStateManager().getOwnID().equals(state.getUuid())) {
             volumeSlider.setWidth(Math.min(width - (PADDING + outlineSize + PADDING + minecraft.font.width(name) + PADDING + PADDING), 100));
             volumeSlider.setPosition(left + (width - volumeSlider.getWidth() - PADDING), top + (height - volumeSlider.getHeight()) / 2);
             volumeSlider.render(guiGraphics, mouseX, mouseY, delta);
         }
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent evt, boolean bl) {
+        boolean handled = super.mouseClicked(evt, bl);
+        if (!handled && evt.button() == 0 && canManage(state)) {
+            openManageScreen();
+            return true;
+        }
+        return handled;
+    }
+
+    private boolean canManage(PlayerState state) {
+        ClientPlayerStateManager stateManager = ClientManager.getPlayerStateManager();
+        UUID own = stateManager.getOwnID();
+        if (group == null || own.equals(state.getUuid())) {
+            return false;
+        }
+        boolean owner = group.isOwner(own);
+        boolean admin = group.isAdmin(own);
+        if (!owner && !admin) {
+            return false;
+        }
+        return owner || !group.isOwner(state.getUuid());
+    }
+
+    private void openManageScreen() {
+        minecraft.setScreen(new GroupManageMemberScreen(group, state.getUuid(), state.getName()));
     }
 
     public PlayerState getState() {

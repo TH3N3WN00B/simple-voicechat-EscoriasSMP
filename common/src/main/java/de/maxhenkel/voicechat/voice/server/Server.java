@@ -23,6 +23,7 @@ import java.net.UnknownHostException;
 import java.nio.channels.AsynchronousCloseException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,6 +45,7 @@ public class Server extends Thread {
     private final PlayerStateManager playerStateManager;
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
+    private final Set<UUID> serverMutedPlayers;
 
     public Server(MinecraftServer server) {
         dedicated = server instanceof DedicatedServer;
@@ -68,6 +70,7 @@ public class Server extends Thread {
         playerStateManager = new PlayerStateManager(this);
         groupManager = new ServerGroupManager(this);
         categoryManager = new ServerCategoryManager(this);
+        serverMutedPlayers = ConcurrentHashMap.newKeySet();
         setDaemon(true);
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
@@ -77,6 +80,9 @@ public class Server extends Thread {
 
     public void onPlayerLoggedIn(ServerPlayer player) {
         playerStateManager.onPlayerLoggedIn(player);
+        if (isServerMuted(player.getUUID())) {
+            playerStateManager.setMuted(player, true);
+        }
     }
 
     public void onPlayerLoggedOut(ServerPlayer player) {
@@ -370,6 +376,13 @@ public class Server extends Thread {
     }
 
     private void processMicPacket(ServerPlayer player, PlayerState state, MicPacket packet) {
+        if (isServerMuted(player.getUUID())) {
+            return;
+        }
+        if (packet.isAnnounce()) {
+            processAnnouncementPacket(state, player, packet);
+            return;
+        }
         if (state.hasGroup()) {
             @Nullable Group group = groupManager.getGroup(state.getGroup());
             processGroupPacket(state, player, packet);
@@ -405,8 +418,11 @@ public class Server extends Thread {
 
     private void processProximityPacket(PlayerState senderState, ServerPlayer sender, MicPacket packet) {
         @Nullable UUID groupId = senderState.getGroup();
+        boolean megaphone = packet.isMegaphone() && !packet.isWhispering();
         float distance;
-        if (packet.isWhispering()) {
+        if (megaphone) {
+            distance = Voicechat.SERVER_CONFIG.megaphoneDistance.get().floatValue();
+        } else if (packet.isWhispering()) {
             distance = Voicechat.SERVER_CONFIG.whisperDistance.get().floatValue();
         } else {
             distance = Utils.getDefaultDistanceServer();
@@ -439,11 +455,34 @@ public class Server extends Thread {
         }
 
         if (soundPacket == null) {
-            soundPacket = new PlayerSoundPacket(sender.getUUID(), sender.getUUID(), packet.getData(), packet.getSequenceNumber(), packet.isWhispering(), distance, null);
+            soundPacket = new PlayerSoundPacket(sender.getUUID(), sender.getUUID(), packet.getData(), packet.getSequenceNumber(), !megaphone && packet.isWhispering(), distance, null);
             source = SoundPacketEvent.SOURCE_PROXIMITY;
         }
 
         broadcast(ServerPlayerManager.getPlayersInRange(sender.level(), sender.position(), getBroadcastRange(distance), p -> !p.getUUID().equals(sender.getUUID())), soundPacket, sender, senderState, groupId, source);
+    }
+
+    private void processAnnouncementPacket(PlayerState senderState, ServerPlayer sender, MicPacket packet) {
+        if (!PermissionManager.INSTANCE.ANNOUNCE_PERMISSION.hasPermission(sender)) {
+            CooldownTimer.run("no-announce-" + sender.getUUID(), 30_000L, () -> {
+                sender.displayClientMessage(Component.translatable("message.voicechat.no_announce_permission"), true);
+            });
+            return;
+        }
+        AnnouncementSoundPacket announcementPacket = new AnnouncementSoundPacket(UUID.randomUUID(), senderState.getUuid(), packet.getData(), packet.getSequenceNumber(), null);
+        for (PlayerState state : playerStateManager.getStates()) {
+            if (senderState.getUuid().equals(state.getUuid())) {
+                continue;
+            }
+            ServerPlayer p = server.getPlayerList().getPlayer(state.getUuid());
+            if (p == null) {
+                continue;
+            }
+            @Nullable ClientConnection connection = getConnection(state.getUuid());
+            sendSoundPacket(sender, senderState, p, state, connection, announcementPacket, SoundPacketEvent.SOURCE_PROXIMITY);
+        }
+        @Nullable ClientConnection senderConnection = getConnection(senderState.getUuid());
+        sendSoundPacket(sender, senderState, sender, senderState, senderConnection, announcementPacket, SoundPacketEvent.SOURCE_PROXIMITY);
     }
 
     public void sendSoundPacket(@Nullable ServerPlayer sender, @Nullable PlayerState senderState, ServerPlayer receiver, PlayerState receiverState, @Nullable ClientConnection connection, SoundPacket<?> soundPacket, String source) {
@@ -549,6 +588,19 @@ public class Server extends Thread {
 
     public Map<UUID, ClientConnection> getConnections() {
         return connections;
+    }
+
+    public boolean isServerMuted(UUID playerUUID) {
+        return serverMutedPlayers.contains(playerUUID);
+    }
+
+    public void setServerMuted(ServerPlayer player, boolean muted) {
+        if (muted) {
+            serverMutedPlayers.add(player.getUUID());
+        } else {
+            serverMutedPlayers.remove(player.getUUID());
+        }
+        playerStateManager.setMuted(player, muted);
     }
 
     @Nullable

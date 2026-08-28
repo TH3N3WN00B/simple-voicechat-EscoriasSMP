@@ -25,6 +25,8 @@ public class KeyEvents {
     public static KeyMapping.Category CATEGORY_VOICECHAT;
     public static KeyMapping KEY_PTT;
     public static KeyMapping KEY_WHISPER;
+    public static KeyMapping KEY_MEGAPHONE;
+    public static KeyMapping KEY_ANNOUNCE;
     public static KeyMapping KEY_MUTE;
     public static KeyMapping KEY_DISABLE;
     public static KeyMapping KEY_HIDE_ICONS;
@@ -50,6 +52,8 @@ public class KeyEvents {
 
         KEY_PTT = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.push_to_talk", InputConstants.UNKNOWN.getValue(), CATEGORY_VOICECHAT));
         KEY_WHISPER = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.whisper", InputConstants.UNKNOWN.getValue(), CATEGORY_VOICECHAT));
+        KEY_MEGAPHONE = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.megaphone", InputConstants.UNKNOWN.getValue(), CATEGORY_VOICECHAT));
+        KEY_ANNOUNCE = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.announce", InputConstants.UNKNOWN.getValue(), CATEGORY_VOICECHAT));
         KEY_MUTE = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.mute_microphone", GLFW.GLFW_KEY_M, CATEGORY_VOICECHAT));
         KEY_DISABLE = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.disable_voice_chat", GLFW.GLFW_KEY_N, CATEGORY_VOICECHAT));
         KEY_HIDE_ICONS = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.hide_icons", GLFW.GLFW_KEY_H, CATEGORY_VOICECHAT));
@@ -60,7 +64,7 @@ public class KeyEvents {
         KEY_ADJUST_VOLUMES = ClientCompatibilityManager.INSTANCE.registerKeyBinding(new KeyMapping("key.voice_chat_adjust_volumes", InputConstants.UNKNOWN.getValue(), CATEGORY_VOICECHAT));
 
         ALL_KEYS = new KeyMapping[]{
-                KEY_PTT, KEY_WHISPER, KEY_MUTE, KEY_DISABLE, KEY_HIDE_ICONS, KEY_VOICE_CHAT, KEY_VOICE_CHAT_SETTINGS, KEY_GROUP, KEY_TOGGLE_RECORDING, KEY_ADJUST_VOLUMES
+                KEY_PTT, KEY_WHISPER, KEY_MEGAPHONE, KEY_ANNOUNCE, KEY_MUTE, KEY_DISABLE, KEY_HIDE_ICONS, KEY_VOICE_CHAT, KEY_VOICE_CHAT_SETTINGS, KEY_GROUP, KEY_TOGGLE_RECORDING, KEY_ADJUST_VOLUMES
         };
     }
 
@@ -120,6 +124,14 @@ public class KeyEvents {
         }
 
         if (KEY_WHISPER.consumeClick()) {
+            checkConnected();
+        }
+
+        if (KEY_MEGAPHONE.consumeClick()) {
+            checkConnected();
+        }
+
+        if (KEY_ANNOUNCE.consumeClick()) {
             checkConnected();
         }
 
