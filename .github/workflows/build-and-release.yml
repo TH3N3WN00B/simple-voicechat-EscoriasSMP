@@ -28,10 +28,28 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - name: Build root modules (Fabric, Forge, NeoForge, Paper) and run tests
-        run: ./gradlew build --console=plain
+        shell: bash
+        run: |
+          for i in $(seq 1 5); do
+            if ./gradlew build --console=plain; then
+              exit 0
+            fi
+            echo "Build attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+          exit 1
       - name: Build Quilt
         working-directory: quilt
-        run: ./gradlew build --console=plain
+        shell: bash
+        run: |
+          for i in $(seq 1 5); do
+            if ./gradlew build --console=plain; then
+              exit 0
+            fi
+            echo "Quilt build attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+          exit 1
       - name: Collect jars
         shell: bash
         run: |
