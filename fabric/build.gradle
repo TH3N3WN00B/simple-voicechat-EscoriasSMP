@@ -27,7 +27,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.jetbrains:annotations:23.0.0'
+    implementation "org.jetbrains:annotations:${jetbrains_annotations_version}"
 
     implementation(include(project(':fabric:api-stub')))
 
@@ -40,8 +40,8 @@ dependencies {
     modImplementation "me.lucko:fabric-permissions-api:${fabric_permission_api_version}"
     modCompileOnly "com.viaversion:viaversion-common:${viaversion_version}"
 
-    implementation "org.concentus:Concentus:${concentus_version}"
-    shadow "org.concentus:Concentus:${concentus_version}"
+    implementation "io.github.jaredmdobson:concentus:${concentus_version}"
+    shadow "io.github.jaredmdobson:concentus:${concentus_version}"
 
     implementation "de.maxhenkel.opus4j:opus4j:${opus4j_version}"
     shadow "de.maxhenkel.opus4j:opus4j:${opus4j_version}"
@@ -69,6 +69,6 @@ sourceSets.main.java {
 compileJava.dependsOn generateJava
 
 shadowJar {
-    relocate 'org.concentus', 'de.maxhenkel.voicechat.concentus'
+    relocate 'io.github.jaredmdobson.concentus', 'de.maxhenkel.voicechat.concentus'
     exclude 'natives/*-x86/*'
 }

@@ -1,8 +1,8 @@
 package de.maxhenkel.voicechat.plugins.impl.opus;
 
 import de.maxhenkel.voicechat.Voicechat;
-import org.concentus.OpusDecoder;
-import org.concentus.OpusException;
+import io.github.jaredmdobson.concentus.OpusDecoder;
+import io.github.jaredmdobson.concentus.OpusException;
 
 import javax.annotation.Nullable;
 

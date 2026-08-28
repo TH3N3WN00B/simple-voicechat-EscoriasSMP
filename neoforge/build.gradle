@@ -24,13 +24,13 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.jetbrains:annotations:23.0.0'
+    implementation "org.jetbrains:annotations:${jetbrains_annotations_version}"
 
     //implementation "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
     compileOnly "me.shedaniel.cloth:cloth-config-neoforge:${cloth_config_version}"
 
-    minecraftLibrary "org.concentus:Concentus:${concentus_version}"
-    shadow "org.concentus:Concentus:${concentus_version}"
+    minecraftLibrary "io.github.jaredmdobson:concentus:${concentus_version}"
+    shadow "io.github.jaredmdobson:concentus:${concentus_version}"
 
     minecraftLibrary "de.maxhenkel.opus4j:opus4j:${opus4j_version}"
     shadow "de.maxhenkel.opus4j:opus4j:${opus4j_version}"
@@ -58,6 +58,6 @@ sourceSets.main.java {
 compileJava.dependsOn generateJava
 
 shadowJar {
-    relocate 'org.concentus', 'de.maxhenkel.voicechat.concentus'
+    relocate 'io.github.jaredmdobson.concentus', 'de.maxhenkel.voicechat.concentus'
     exclude 'natives/*-x86/*'
 }

@@ -1,7 +1,7 @@
 package de.maxhenkel.voicechat.plugins.impl.opus;
 
-import org.concentus.OpusApplication;
-import org.concentus.OpusEncoder;
+import io.github.jaredmdobson.concentus.OpusApplication;
+import io.github.jaredmdobson.concentus.OpusEncoder;
 import de.maxhenkel.opus4j.OpusEncoder.Application;
 
 public class JavaOpusEncoderImpl implements de.maxhenkel.voicechat.api.opus.OpusEncoder {
