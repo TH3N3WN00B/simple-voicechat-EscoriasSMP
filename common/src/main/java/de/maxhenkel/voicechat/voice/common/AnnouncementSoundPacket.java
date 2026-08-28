@@ -3,9 +3,14 @@ package de.maxhenkel.voicechat.voice.common;
 import net.minecraft.network.FriendlyByteBuf;
 
 import javax.annotation.Nullable;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 public class AnnouncementSoundPacket extends SoundPacket<AnnouncementSoundPacket> {
+
+    public static UUID getAnnouncementChannelId(UUID sender) {
+        return UUID.nameUUIDFromBytes(("voicechat:announce:" + sender.toString()).getBytes(StandardCharsets.US_ASCII));
+    }
 
     public AnnouncementSoundPacket(UUID channelId, UUID sender, byte[] data, long sequenceNumber, @Nullable String category) {
         super(channelId, sender, data, sequenceNumber, category);

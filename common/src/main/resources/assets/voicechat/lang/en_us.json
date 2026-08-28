@@ -269,5 +269,7 @@
   "message.voicechat.no_voicechat_tag": "(No Voice Chat)",
   "message.voicechat.mute_success": "Muted %s",
   "message.voicechat.unmute_success": "Unmuted %s",
-  "message.voicechat.announcement": "[Announcement] %s: %s"
+  "message.voicechat.announce_mode_enabled": "Announce mode enabled. Your voice will be heard by all players on the server.",
+  "message.voicechat.announce_mode_disabled": "Announce mode disabled.",
+  "message.voicechat.announce_only_players": "Only players can use this command."
 }

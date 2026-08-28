@@ -346,23 +346,22 @@ public class VoicechatCommands {
             return 1;
         })));
 
-        literalBuilder.then(Commands.literal("announce").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ANNOUNCE_PERMISSION)).then(Commands.argument("message", StringArgumentType.greedyString()).executes((commandSource) -> {
+        literalBuilder.then(Commands.literal("announce").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ANNOUNCE_PERMISSION)).executes((commandSource) -> {
             Server server = getServer(commandSource.getSource());
             if (server == null) {
                 return 1;
             }
-            String message = StringArgumentType.getString(commandSource, "message");
-            String senderName = "Server";
+            ServerPlayer player;
             try {
-                senderName = commandSource.getSource().getPlayerOrException().getName().getString();
-            } catch (CommandSyntaxException ignored) {
+                player = commandSource.getSource().getPlayerOrException();
+            } catch (CommandSyntaxException e) {
+                commandSource.getSource().sendFailure(Component.translatable("message.voicechat.announce_only_players"));
+                return 1;
             }
-            MinecraftServer minecraftServer = server.getServer();
-            Component announcement = Component.translatable("message.voicechat.announcement", Component.literal(senderName).withStyle(ChatFormatting.AQUA), Component.literal(message).withStyle(ChatFormatting.GOLD)).withStyle(ChatFormatting.BOLD);
-            minecraftServer.getPlayerList().broadcastSystemMessage(announcement, false);
-            minecraftServer.sendSystemMessage(announcement);
+            boolean announceMode = server.toggleAnnounceMode(player);
+            commandSource.getSource().sendSuccess(() -> Component.translatable(announceMode ? "message.voicechat.announce_mode_enabled" : "message.voicechat.announce_mode_disabled"), false);
             return 1;
-        })));
+        }));
 
         dispatcher.register(literalBuilder);
     }

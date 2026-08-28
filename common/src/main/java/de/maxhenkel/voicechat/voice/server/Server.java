@@ -46,6 +46,7 @@ public class Server extends Thread {
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
     private final Set<UUID> serverMutedPlayers;
+    private final Set<UUID> announceModePlayers;
 
     public Server(MinecraftServer server) {
         dedicated = server instanceof DedicatedServer;
@@ -71,6 +72,7 @@ public class Server extends Thread {
         groupManager = new ServerGroupManager(this);
         categoryManager = new ServerCategoryManager(this);
         serverMutedPlayers = ConcurrentHashMap.newKeySet();
+        announceModePlayers = ConcurrentHashMap.newKeySet();
         setDaemon(true);
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
@@ -89,6 +91,7 @@ public class Server extends Thread {
         this.disconnectClient(player.getUUID());
         playerStateManager.onPlayerLoggedOut(player);
         groupManager.onPlayerLoggedOut(player);
+        announceModePlayers.remove(player.getUUID());
     }
 
     public void onPlayerHide(ServerPlayer visibilityChangedPlayer, ServerPlayer observingPlayer) {
@@ -379,7 +382,7 @@ public class Server extends Thread {
         if (isServerMuted(player.getUUID())) {
             return;
         }
-        if (packet.isAnnounce()) {
+        if (packet.isAnnounce() || isAnnounceModeActive(player.getUUID())) {
             processAnnouncementPacket(state, player, packet);
             return;
         }
@@ -469,7 +472,7 @@ public class Server extends Thread {
             });
             return;
         }
-        AnnouncementSoundPacket announcementPacket = new AnnouncementSoundPacket(UUID.randomUUID(), senderState.getUuid(), packet.getData(), packet.getSequenceNumber(), null);
+        AnnouncementSoundPacket announcementPacket = new AnnouncementSoundPacket(AnnouncementSoundPacket.getAnnouncementChannelId(senderState.getUuid()), senderState.getUuid(), packet.getData(), packet.getSequenceNumber(), null);
         for (PlayerState state : playerStateManager.getStates()) {
             if (senderState.getUuid().equals(state.getUuid())) {
                 continue;
@@ -601,6 +604,19 @@ public class Server extends Thread {
             serverMutedPlayers.remove(player.getUUID());
         }
         playerStateManager.setMuted(player, muted);
+    }
+
+    public boolean isAnnounceModeActive(UUID playerUuid) {
+        return announceModePlayers.contains(playerUuid);
+    }
+
+    public boolean toggleAnnounceMode(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        if (announceModePlayers.add(uuid)) {
+            return true;
+        }
+        announceModePlayers.remove(uuid);
+        return false;
     }
 
     @Nullable
