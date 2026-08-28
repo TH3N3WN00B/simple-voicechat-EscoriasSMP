@@ -42,6 +42,7 @@ jobs:
         working-directory: quilt
         shell: bash
         run: |
+          chmod +x ./gradlew
           for i in $(seq 1 5); do
             if ./gradlew build --console=plain; then
               exit 0
