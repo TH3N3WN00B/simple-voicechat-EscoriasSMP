@@ -18,6 +18,7 @@ import net.minecraft.world.entity.Entity;
 
 import javax.annotation.Nullable;
 import java.net.InetAddress;
+import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.channels.AsynchronousCloseException;
@@ -34,6 +35,7 @@ public class Server extends Thread {
 
     private final Map<UUID, ClientConnection> connections;
     private final Map<UUID, ClientConnection> unCheckedConnections;
+    private final Map<SocketAddress, ClientConnection> connectionIndex;
     private final Map<UUID, Secret> secrets;
     private static final int PACKET_QUEUE_CAPACITY = 10_000;
     private final boolean dedicated;
@@ -66,6 +68,7 @@ public class Server extends Thread {
         socket = PluginManager.instance().getSocketImplementation(server);
         connections = new ConcurrentHashMap<>();
         unCheckedConnections = new ConcurrentHashMap<>();
+        connectionIndex = new ConcurrentHashMap<>();
         secrets = new ConcurrentHashMap<>();
         packetQueue = new ArrayBlockingQueue<>(PACKET_QUEUE_CAPACITY);
         pingManager = new PingManager(this);
@@ -202,6 +205,7 @@ public class Server extends Thread {
         old.close();
         connections.clear();
         unCheckedConnections.clear();
+        connectionIndex.clear();
         secrets.clear();
     }
 
@@ -232,10 +236,20 @@ public class Server extends Thread {
     }
 
     public void disconnectClient(UUID playerUUID) {
-        connections.remove(playerUUID);
-        unCheckedConnections.remove(playerUUID);
+        removeConnection(playerUUID);
         secrets.remove(playerUUID);
         PluginManager.instance().onPlayerDisconnected(playerUUID);
+    }
+
+    private void removeConnection(UUID playerUUID) {
+        ClientConnection connection = connections.remove(playerUUID);
+        if (connection != null) {
+            connectionIndex.remove(connection.getAddress());
+        }
+        ClientConnection unconnected = unCheckedConnections.remove(playerUUID);
+        if (unconnected != null) {
+            connectionIndex.remove(unconnected.getAddress());
+        }
     }
 
     public void close() {
@@ -309,6 +323,7 @@ public class Server extends Thread {
                             if (connection == null) {
                                 connection = new ClientConnection(packet.getPlayerUUID(), message.getAddress());
                                 unCheckedConnections.put(packet.getPlayerUUID(), connection);
+                                connectionIndex.put(message.getAddress(), connection);
                                 Voicechat.LOGGER.info("Successfully authenticated player {}", packet.getPlayerUUID());
                             }
                             sendPacket(new AuthenticateAckPacket(), connection);
@@ -327,6 +342,7 @@ public class Server extends Thread {
                         // Refresh keepalive, so players who took longer than the timeout can still connect
                         connection.setLastKeepAliveResponse(System.currentTimeMillis());
                         connections.put(connection.getPlayerUUID(), connection);
+                        connectionIndex.put(connection.getAddress(), connection);
                         unCheckedConnections.remove(connection.getPlayerUUID());
                         Voicechat.LOGGER.info("Successfully validated connection of player {}", connection.getPlayerUUID());
                         ServerPlayer player = server.getPlayerList().getPlayer(connection.getPlayerUUID());
@@ -551,6 +567,7 @@ public class Server extends Thread {
         connections.values().removeIf(connection -> {
             if (timestamp - connection.getLastKeepAliveResponse() >= Voicechat.SERVER_CONFIG.keepAlive.get() * 10L) {
                 // Don't call disconnectClient here!
+                connectionIndex.remove(connection.getAddress());
                 secrets.remove(connection.getPlayerUUID());
                 Voicechat.LOGGER.info("Player {} timed out", connection.getPlayerUUID());
                 ServerPlayer player = server.getPlayerList().getPlayer(connection.getPlayerUUID());
@@ -575,22 +592,20 @@ public class Server extends Thread {
 
     @Nullable
     public ClientConnection getSender(NetworkMessage message) {
-        return connections
-                .values()
-                .stream()
-                .filter(connection -> connection.getAddress().equals(message.getAddress()))
-                .findAny()
-                .orElse(null);
+        ClientConnection connection = connectionIndex.get(message.getAddress());
+        if (connection != null && connections.get(connection.getPlayerUUID()) == connection) {
+            return connection;
+        }
+        return null;
     }
 
     @Nullable
     public ClientConnection getUnconnectedSender(NetworkMessage message) {
-        return unCheckedConnections
-                .values()
-                .stream()
-                .filter(connection -> connection.getAddress().equals(message.getAddress()))
-                .findAny()
-                .orElse(null);
+        ClientConnection connection = connectionIndex.get(message.getAddress());
+        if (connection != null && unCheckedConnections.get(connection.getPlayerUUID()) == connection) {
+            return connection;
+        }
+        return null;
     }
 
     public Map<UUID, ClientConnection> getConnections() {
