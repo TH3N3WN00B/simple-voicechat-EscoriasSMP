@@ -191,6 +191,7 @@ public class PluginManager {
     }
 
     public void onPlayerDisconnected(UUID player) {
+        playerAudioListeners.remove(player);
         dispatchEvent(PlayerDisconnectedEvent.class, new PlayerDisconnectedEventImpl(player));
     }
 

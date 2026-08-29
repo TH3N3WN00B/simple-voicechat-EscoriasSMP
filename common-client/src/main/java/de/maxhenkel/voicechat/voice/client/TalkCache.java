@@ -15,6 +15,8 @@ public class TalkCache {
 
     private static final PlayerCache DEFAULT = new PlayerCache(0L, false, AudioUtils.LOWEST_DB);
 
+    private static final int MAX_ENTRIES = 1_024;
+
     private final Map<UUID, PlayerCache> playerCache;
     private final Map<String, CategoryCache> categoryCache;
     private Supplier<Long> timestampSupplier;
@@ -32,12 +34,20 @@ public class TalkCache {
     private void updateTalking(UUID entity, boolean whispering, double audioLevel) {
         PlayerCache talk = playerCache.get(entity);
         if (talk == null) {
-            talk = new PlayerCache(timestampSupplier.get(), whispering, audioLevel);
+            long now = timestampSupplier.get();
+            talk = new PlayerCache(now, whispering, audioLevel);
             playerCache.put(entity, talk);
+            prunePlayerCache(now);
         } else {
             talk.timestamp = timestampSupplier.get();
             talk.whispering = whispering;
             talk.audioLevel = audioLevel;
+        }
+    }
+
+    private void prunePlayerCache(long now) {
+        if (playerCache.size() > MAX_ENTRIES) {
+            playerCache.values().removeIf(cache -> now - cache.timestamp > TIMEOUT);
         }
     }
 
@@ -109,8 +119,12 @@ public class TalkCache {
     public void updateCategoryVolume(String category, double audioLevel) {
         CategoryCache cache = categoryCache.get(category);
         if (cache == null) {
-            cache = new CategoryCache(timestampSupplier.get(), audioLevel);
+            long now = timestampSupplier.get();
+            cache = new CategoryCache(now, audioLevel);
             categoryCache.put(category, cache);
+            if (categoryCache.size() > MAX_ENTRIES) {
+                categoryCache.values().removeIf(c -> now - c.timestamp > TIMEOUT);
+            }
         } else {
             cache.timestamp = timestampSupplier.get();
             cache.audioLevel = audioLevel;

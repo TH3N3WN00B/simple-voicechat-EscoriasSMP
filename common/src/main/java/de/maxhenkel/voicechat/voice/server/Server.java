@@ -25,9 +25,9 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 public class Server extends Thread {
@@ -35,6 +35,7 @@ public class Server extends Thread {
     private final Map<UUID, ClientConnection> connections;
     private final Map<UUID, ClientConnection> unCheckedConnections;
     private final Map<UUID, Secret> secrets;
+    private static final int PACKET_QUEUE_CAPACITY = 10_000;
     private final boolean dedicated;
     private int port;
     private final MinecraftServer server;
@@ -66,7 +67,7 @@ public class Server extends Thread {
         connections = new ConcurrentHashMap<>();
         unCheckedConnections = new ConcurrentHashMap<>();
         secrets = new ConcurrentHashMap<>();
-        packetQueue = new LinkedBlockingQueue<>();
+        packetQueue = new ArrayBlockingQueue<>(PACKET_QUEUE_CAPACITY);
         pingManager = new PingManager(this);
         playerStateManager = new PlayerStateManager(this);
         groupManager = new ServerGroupManager(this);
@@ -137,7 +138,10 @@ public class Server extends Thread {
 
             while (!socket.isClosed()) {
                 try {
-                    packetQueue.add(socket.read());
+                    RawUdpPacket packet = socket.read();
+                    if (!packetQueue.offer(packet)) {
+                        CooldownTimer.run("packet_queue_full", () -> Voicechat.LOGGER.warn("Voice chat packet queue is full, dropping packets"));
+                    }
                 } catch (Exception e) {
                     // Only log an error if the error isn't caused by the socket being closed
                     if (!(e instanceof SocketException && e.getCause() instanceof AsynchronousCloseException)) {

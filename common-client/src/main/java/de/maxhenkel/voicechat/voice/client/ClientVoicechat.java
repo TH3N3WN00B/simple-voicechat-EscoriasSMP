@@ -53,6 +53,10 @@ public class ClientVoicechat {
 
     public void onVoiceChatDisconnected() {
         closeMicThread();
+        synchronized (audioChannels) {
+            audioChannels.forEach((uuid, audioChannel) -> audioChannel.closeAndKill());
+            audioChannels.clear();
+        }
         if (connection != null) {
             connection.close();
             connection = null;
@@ -243,11 +247,13 @@ public class ClientVoicechat {
 
     public boolean closeAudioChannel(UUID id) {
         synchronized (audioChannels) {
-            boolean removed = audioChannels.remove(id) != null;
-            if (removed) {
+            AudioChannel channel = audioChannels.remove(id);
+            if (channel != null) {
+                channel.closeAndKill();
                 Voicechat.LOGGER.debug("Removed audio channel of {} due to disconnection from voice chat", id);
+                return true;
             }
-            return removed;
+            return false;
         }
     }
 
