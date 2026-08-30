@@ -10,6 +10,7 @@ public class PTTKeyHandler {
 
     private boolean pttKeyDown;
     private boolean whisperKeyDown;
+    private boolean announceKeyDown;
 
     public PTTKeyHandler() {
         ClientCompatibilityManager.INSTANCE.onKeyboardEvent(this::onKeyboardEvent);
@@ -26,6 +27,11 @@ public class PTTKeyHandler {
         if (whisperKey.getValue() != -1 && !whisperKey.getType().equals(InputConstants.Type.MOUSE)) {
             whisperKeyDown = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), whisperKey.getValue());
         }
+
+        InputConstants.Key announceKey = ClientCompatibilityManager.INSTANCE.getBoundKeyOf(KeyEvents.KEY_ANNOUNCE);
+        if (announceKey.getValue() != -1 && !announceKey.getType().equals(InputConstants.Type.MOUSE)) {
+            announceKeyDown = InputConstants.isKeyDown(Minecraft.getInstance().getWindow(), announceKey.getValue());
+        }
     }
 
     public void onMouseEvent(MouseButtonInfo mouseButtonInfo, int action) {
@@ -38,6 +44,11 @@ public class PTTKeyHandler {
         if (whisperKey.getValue() != -1 && whisperKey.getType().equals(InputConstants.Type.MOUSE) && whisperKey.getValue() == mouseButtonInfo.button()) {
             whisperKeyDown = action != 0;
         }
+
+        InputConstants.Key announceKey = ClientCompatibilityManager.INSTANCE.getBoundKeyOf(KeyEvents.KEY_ANNOUNCE);
+        if (announceKey.getValue() != -1 && announceKey.getType().equals(InputConstants.Type.MOUSE) && announceKey.getValue() == mouseButtonInfo.button()) {
+            announceKeyDown = action != 0;
+        }
     }
 
     public boolean isPTTDown() {
@@ -48,8 +59,12 @@ public class PTTKeyHandler {
         return whisperKeyDown;
     }
 
+    public boolean isAnnounceDown() {
+        return announceKeyDown;
+    }
+
     public boolean isAnyDown() {
-        return pttKeyDown || whisperKeyDown;
+        return pttKeyDown || whisperKeyDown || announceKeyDown;
     }
 
 }

@@ -18,22 +18,26 @@ import net.minecraft.world.entity.Entity;
 
 import javax.annotation.Nullable;
 import java.net.InetAddress;
+import java.net.SocketAddress;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.channels.AsynchronousCloseException;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 public class Server extends Thread {
 
     private final Map<UUID, ClientConnection> connections;
     private final Map<UUID, ClientConnection> unCheckedConnections;
+    private final Map<SocketAddress, ClientConnection> connectionIndex;
     private final Map<UUID, Secret> secrets;
+    private static final int PACKET_QUEUE_CAPACITY = 10_000;
     private final boolean dedicated;
     private int port;
     private final MinecraftServer server;
@@ -44,6 +48,7 @@ public class Server extends Thread {
     private final PlayerStateManager playerStateManager;
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
+    private final Set<UUID> announceModePlayers;
 
     public Server(MinecraftServer server) {
         dedicated = server instanceof DedicatedServer;
@@ -62,12 +67,14 @@ public class Server extends Thread {
         socket = PluginManager.instance().getSocketImplementation(server);
         connections = new ConcurrentHashMap<>();
         unCheckedConnections = new ConcurrentHashMap<>();
+        connectionIndex = new ConcurrentHashMap<>();
         secrets = new ConcurrentHashMap<>();
-        packetQueue = new LinkedBlockingQueue<>();
+        packetQueue = new ArrayBlockingQueue<>(PACKET_QUEUE_CAPACITY);
         pingManager = new PingManager(this);
         playerStateManager = new PlayerStateManager(this);
         groupManager = new ServerGroupManager(this);
         categoryManager = new ServerCategoryManager(this);
+        announceModePlayers = ConcurrentHashMap.newKeySet();
         setDaemon(true);
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
@@ -83,6 +90,7 @@ public class Server extends Thread {
         this.disconnectClient(player.getUUID());
         playerStateManager.onPlayerLoggedOut(player);
         groupManager.onPlayerLoggedOut(player);
+        announceModePlayers.remove(player.getUUID());
     }
 
     public void onPlayerHide(ServerPlayer visibilityChangedPlayer, ServerPlayer observingPlayer) {
@@ -128,7 +136,10 @@ public class Server extends Thread {
 
             while (!socket.isClosed()) {
                 try {
-                    packetQueue.add(socket.read());
+                    RawUdpPacket packet = socket.read();
+                    if (!packetQueue.offer(packet)) {
+                        CooldownTimer.run("packet_queue_full", () -> Voicechat.LOGGER.warn("Voice chat packet queue is full, dropping packets"));
+                    }
                 } catch (Exception e) {
                     // Only log an error if the error isn't caused by the socket being closed
                     if (!(e instanceof SocketException && e.getCause() instanceof AsynchronousCloseException)) {
@@ -189,6 +200,7 @@ public class Server extends Thread {
         old.close();
         connections.clear();
         unCheckedConnections.clear();
+        connectionIndex.clear();
         secrets.clear();
     }
 
@@ -219,10 +231,20 @@ public class Server extends Thread {
     }
 
     public void disconnectClient(UUID playerUUID) {
-        connections.remove(playerUUID);
-        unCheckedConnections.remove(playerUUID);
+        removeConnection(playerUUID);
         secrets.remove(playerUUID);
         PluginManager.instance().onPlayerDisconnected(playerUUID);
+    }
+
+    private void removeConnection(UUID playerUUID) {
+        ClientConnection connection = connections.remove(playerUUID);
+        if (connection != null) {
+            connectionIndex.remove(connection.getAddress());
+        }
+        ClientConnection unconnected = unCheckedConnections.remove(playerUUID);
+        if (unconnected != null) {
+            connectionIndex.remove(unconnected.getAddress());
+        }
     }
 
     public void close() {
@@ -296,6 +318,7 @@ public class Server extends Thread {
                             if (connection == null) {
                                 connection = new ClientConnection(packet.getPlayerUUID(), message.getAddress());
                                 unCheckedConnections.put(packet.getPlayerUUID(), connection);
+                                connectionIndex.put(message.getAddress(), connection);
                                 Voicechat.LOGGER.info("Successfully authenticated player {}", packet.getPlayerUUID());
                             }
                             sendPacket(new AuthenticateAckPacket(), connection);
@@ -314,6 +337,7 @@ public class Server extends Thread {
                         // Refresh keepalive, so players who took longer than the timeout can still connect
                         connection.setLastKeepAliveResponse(System.currentTimeMillis());
                         connections.put(connection.getPlayerUUID(), connection);
+                        connectionIndex.put(connection.getAddress(), connection);
                         unCheckedConnections.remove(connection.getPlayerUUID());
                         Voicechat.LOGGER.info("Successfully validated connection of player {}", connection.getPlayerUUID());
                         ServerPlayer player = server.getPlayerList().getPlayer(connection.getPlayerUUID());
@@ -370,6 +394,10 @@ public class Server extends Thread {
     }
 
     private void processMicPacket(ServerPlayer player, PlayerState state, MicPacket packet) {
+        if (packet.isAnnounce() || isAnnounceModeActive(player.getUUID())) {
+            processAnnouncementPacket(state, player, packet);
+            return;
+        }
         if (state.hasGroup()) {
             @Nullable Group group = groupManager.getGroup(state.getGroup());
             processGroupPacket(state, player, packet);
@@ -446,6 +474,29 @@ public class Server extends Thread {
         broadcast(ServerPlayerManager.getPlayersInRange(sender.level(), sender.position(), getBroadcastRange(distance), p -> !p.getUUID().equals(sender.getUUID())), soundPacket, sender, senderState, groupId, source);
     }
 
+    private void processAnnouncementPacket(PlayerState senderState, ServerPlayer sender, MicPacket packet) {
+        if (!PermissionManager.INSTANCE.ANNOUNCE_PERMISSION.hasPermission(sender)) {
+            CooldownTimer.run("no-announce-" + sender.getUUID(), 30_000L, () -> {
+                sender.sendOverlayMessage(Component.translatable("message.voicechat.no_announce_permission"));
+            });
+            return;
+        }
+        AnnouncementSoundPacket announcementPacket = new AnnouncementSoundPacket(AnnouncementSoundPacket.getAnnouncementChannelId(senderState.getUuid()), senderState.getUuid(), packet.getData(), packet.getSequenceNumber(), null);
+        for (PlayerState state : playerStateManager.getStates()) {
+            if (senderState.getUuid().equals(state.getUuid())) {
+                continue;
+            }
+            ServerPlayer p = server.getPlayerList().getPlayer(state.getUuid());
+            if (p == null) {
+                continue;
+            }
+            @Nullable ClientConnection connection = getConnection(state.getUuid());
+            sendSoundPacket(sender, senderState, p, state, connection, announcementPacket, SoundPacketEvent.SOURCE_PROXIMITY);
+        }
+        @Nullable ClientConnection senderConnection = getConnection(senderState.getUuid());
+        sendSoundPacket(sender, senderState, sender, senderState, senderConnection, announcementPacket, SoundPacketEvent.SOURCE_PROXIMITY);
+    }
+
     public void sendSoundPacket(@Nullable ServerPlayer sender, @Nullable PlayerState senderState, ServerPlayer receiver, PlayerState receiverState, @Nullable ClientConnection connection, SoundPacket<?> soundPacket, String source) {
         PluginManager.instance().onListenerAudio(receiver.getUUID(), soundPacket);
 
@@ -505,6 +556,7 @@ public class Server extends Thread {
         connections.values().removeIf(connection -> {
             if (timestamp - connection.getLastKeepAliveResponse() >= Voicechat.SERVER_CONFIG.keepAlive.get() * 10L) {
                 // Don't call disconnectClient here!
+                connectionIndex.remove(connection.getAddress());
                 secrets.remove(connection.getPlayerUUID());
                 Voicechat.LOGGER.info("Player {} timed out", connection.getPlayerUUID());
                 ServerPlayer player = server.getPlayerList().getPlayer(connection.getPlayerUUID());
@@ -529,26 +581,37 @@ public class Server extends Thread {
 
     @Nullable
     public ClientConnection getSender(NetworkMessage message) {
-        return connections
-                .values()
-                .stream()
-                .filter(connection -> connection.getAddress().equals(message.getAddress()))
-                .findAny()
-                .orElse(null);
+        ClientConnection connection = connectionIndex.get(message.getAddress());
+        if (connection != null && connections.get(connection.getPlayerUUID()) == connection) {
+            return connection;
+        }
+        return null;
     }
 
     @Nullable
     public ClientConnection getUnconnectedSender(NetworkMessage message) {
-        return unCheckedConnections
-                .values()
-                .stream()
-                .filter(connection -> connection.getAddress().equals(message.getAddress()))
-                .findAny()
-                .orElse(null);
+        ClientConnection connection = connectionIndex.get(message.getAddress());
+        if (connection != null && unCheckedConnections.get(connection.getPlayerUUID()) == connection) {
+            return connection;
+        }
+        return null;
     }
 
     public Map<UUID, ClientConnection> getConnections() {
         return connections;
+    }
+
+    public boolean isAnnounceModeActive(UUID playerUuid) {
+        return announceModePlayers.contains(playerUuid);
+    }
+
+    public boolean toggleAnnounceMode(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        if (announceModePlayers.add(uuid)) {
+            return true;
+        }
+        announceModePlayers.remove(uuid);
+        return false;
     }
 
     @Nullable

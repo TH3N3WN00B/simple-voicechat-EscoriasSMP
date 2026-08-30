@@ -19,6 +19,22 @@ A proximity voice chat for Minecraft with a variety of [addons](https://modrepo.
 :warning: **NOTE** This mod requires special setup on the server in order to work.
 Please read the [wiki](https://modrepo.de/minecraft/voicechat/wiki/setup) for more information.
 
+## EscoriasSMP Fork
+
+This repository is a **fork** of [Simple Voice Chat](https://github.com/henkelmax/simple-voice-chat) (branch `26.2`) by [Max Henkel (henkelmax)](https://github.com/henkelmax), customized for the **EscoriasSMP** server.
+
+**All credit for the original mod goes to `henkelmax` and the Simple Voice Chat contributors.** This fork only adds a few changes on top of the original:
+
+### Changes in this fork
+
+- **Announce mode (voice broadcast)**: `/voicechat announce` is an **operator-only** toggle. While enabled, the player's voice is heard by **everyone** on the server — including players inside groups or isolated rooms. No chat message is sent, it is a pure voice broadcast.
+  Requires the `voicechat.announce` permission (granted to operators by default). The legacy client-side *Announce* key still works as an alternative while held.
+- **Performance & stability**:
+  - O(1) UDP sender lookup on the server (reverse address index), replacing a per-packet scan over all connections.
+  - Bounded UDP packet queue with backpressure — no memory blow-up under overload.
+  - Bounded caches and stale state is cleaned up on player disconnects (cooldown timers, plugin audio listeners, announce state).
+  - Client audio channels are fully closed on voice disconnect (no leaked OpenAL speakers/buffers), and less garbage is allocated in the hot audio paths.
+
 <p align="center">
     <a href="https://discord.gg/4dH2zwTmyX">
         <img src="assets/discord.svg" width="300">

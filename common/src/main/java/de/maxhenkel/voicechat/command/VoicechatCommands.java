@@ -197,6 +197,27 @@ public class VoicechatCommands {
             return 1;
         }));
 
+        literalBuilder.then(Commands.literal("announce").requires((commandSource) -> checkPermission(commandSource, PermissionManager.INSTANCE.ANNOUNCE_PERMISSION)).executes((commandSource) -> {
+            if (checkNoVoicechat(commandSource)) {
+                return 0;
+            }
+            Server server = Voicechat.SERVER.getServer();
+            if (server == null) {
+                commandSource.getSource().sendSuccess(() -> Component.translatable("message.voicechat.voice_chat_unavailable"), false);
+                return 1;
+            }
+            ServerPlayer player;
+            try {
+                player = commandSource.getSource().getPlayerOrException();
+            } catch (CommandSyntaxException e) {
+                commandSource.getSource().sendFailure(Component.translatable("message.voicechat.announce_only_players"));
+                return 1;
+            }
+            boolean announceMode = server.toggleAnnounceMode(player);
+            commandSource.getSource().sendSuccess(() -> Component.translatable(announceMode ? "message.voicechat.announce_mode_enabled" : "message.voicechat.announce_mode_disabled"), false);
+            return 1;
+        }));
+
         dispatcher.register(literalBuilder);
     }
 

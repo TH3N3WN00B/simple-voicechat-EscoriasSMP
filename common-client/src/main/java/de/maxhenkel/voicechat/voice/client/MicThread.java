@@ -105,11 +105,14 @@ public class MicThread extends Thread {
                 continue;
             }
 
-            if (!microphoneProcessor.shouldTransmitAudio()) {
+            boolean announce = ClientManager.getPttKeyHandler().isAnnounceDown();
+            boolean whispering = !announce && microphoneProcessor.isWhispering();
+
+            if (!microphoneProcessor.shouldTransmitAudio() && !announce) {
                 processed = null;
             }
 
-            sendAudio(processed, microphoneProcessor.isWhispering());
+            sendAudio(processed, whispering, announce);
         }
     }
 
@@ -180,10 +183,11 @@ public class MicThread extends Thread {
      * If {@param rawAudio} is null and no audio is being injected, a stop packet will be sent.
      * This needs to get called every microphone poll, even if no mic audio should be sent.
      *
-     * @param rawAudio   the raw audio or
+     * @param rawAudio   the raw audio or null
      * @param whispering whether the player is whispering
+     * @param announce   whether the player is making an announcement
      */
-    private void sendAudio(@Nullable short[] rawAudio, boolean whispering) {
+    private void sendAudio(@Nullable short[] rawAudio, boolean whispering, boolean announce) {
         @Nullable short[] mergedAudio = ClientPluginManager.instance().onMergeClientSound(rawAudio);
         if (mergedAudio == null) {
             flushIfNeeded();
@@ -195,7 +199,7 @@ public class MicThread extends Thread {
             return;
         }
 
-        sendAudioPacket(finalAudio, whispering);
+        sendAudioPacket(finalAudio, whispering, announce);
         hasSentAudio = true;
     }
 
@@ -254,10 +258,10 @@ public class MicThread extends Thread {
     private final AtomicLong sequenceNumber = new AtomicLong();
     private volatile boolean stopPacketSent = true;
 
-    private void sendAudioPacket(short[] audio, boolean whispering) {
+    private void sendAudioPacket(short[] audio, boolean whispering, boolean announce) {
         if (connection != null && connection.isInitialized()) {
             byte[] encoded = encoder.encode(audio);
-            connection.sendToServer(new NetworkMessage(new MicPacket(encoded, whispering, sequenceNumber.getAndIncrement())));
+            connection.sendToServer(new NetworkMessage(new MicPacket(encoded, whispering, announce, sequenceNumber.getAndIncrement())));
             stopPacketSent = false;
         }
         try {

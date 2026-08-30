@@ -157,6 +157,8 @@ public abstract class ALSpeakerBase implements Speaker {
         return data;
     }
 
+    private static final ThreadLocal<float[]> ORIENTATION = ThreadLocal.withInitial(() -> new float[6]);
+
     protected void setPositionSync(@Nullable Vec3 soundPos, float maxDistance) {
         CameraState camera = ClientManager.getCameraState();
         Vec3 position = camera.position();
@@ -164,7 +166,14 @@ public abstract class ALSpeakerBase implements Speaker {
         Vector3fc up = camera.up();
         AL11.alListener3f(AL11.AL_POSITION, (float) position.x, (float) position.y, (float) position.z);
         SoundManager.checkAlError();
-        AL11.alListenerfv(AL11.AL_ORIENTATION, new float[]{look.x(), look.y(), look.z(), up.x(), up.y(), up.z()});
+        float[] orientation = ORIENTATION.get();
+        orientation[0] = look.x();
+        orientation[1] = look.y();
+        orientation[2] = look.z();
+        orientation[3] = up.x();
+        orientation[4] = up.y();
+        orientation[5] = up.z();
+        AL11.alListenerfv(AL11.AL_ORIENTATION, orientation);
         SoundManager.checkAlError();
         if (soundPos != null) {
             linearAttenuation(maxDistance);
@@ -186,13 +195,13 @@ public abstract class ALSpeakerBase implements Speaker {
         runInContext(this::closeSync);
         executor.shutdown();
         try {
-            if (executor.awaitTermination(1L, TimeUnit.SECONDS)) {
-                soundManager.untrackSpeaker(this);
-            } else {
+            if (!executor.awaitTermination(1L, TimeUnit.SECONDS)) {
                 Voicechat.LOGGER.warn("Timed out waiting for speaker to close");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } finally {
+            soundManager.untrackSpeaker(this);
         }
     }
 

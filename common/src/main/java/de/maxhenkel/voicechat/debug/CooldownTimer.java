@@ -4,6 +4,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class CooldownTimer {
 
+    private static final int MAX_ENTRIES = 10_000;
     private static ConcurrentHashMap<String, Long> cooldowns;
 
     static {
@@ -11,9 +12,23 @@ public class CooldownTimer {
     }
 
     public static void run(String id, long time, Runnable runnable) {
-        if (System.currentTimeMillis() - cooldowns.getOrDefault(id, 0L) > time) {
-            cooldowns.put(id, System.currentTimeMillis());
+        long now = System.currentTimeMillis();
+        Long last = cooldowns.putIfAbsent(id, now);
+        if (last == null) {
             runnable.run();
+            prune(now);
+            return;
+        }
+        if (now - last > time) {
+            cooldowns.put(id, now);
+            runnable.run();
+            prune(now);
+        }
+    }
+
+    private static void prune(long now) {
+        if (cooldowns.size() > MAX_ENTRIES) {
+            cooldowns.entrySet().removeIf(entry -> now - entry.getValue() > 100_000L);
         }
     }
 

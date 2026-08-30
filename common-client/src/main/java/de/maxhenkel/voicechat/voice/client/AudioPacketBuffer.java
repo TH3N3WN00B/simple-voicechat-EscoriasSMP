@@ -4,7 +4,6 @@ import de.maxhenkel.voicechat.voice.common.SoundPacket;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -51,8 +50,12 @@ public class AudioPacketBuffer {
         if (packet.getData().length <= 0) {
             isFlushingBuffer = true;
         }
-        packetBuffer.add(packet);
-        packetBuffer.sort(Comparator.comparingLong(SoundPacket::getSequenceNumber));
+        long sequenceNumber = packet.getSequenceNumber();
+        int index = packetBuffer.size();
+        while (index > 0 && packetBuffer.get(index - 1).getSequenceNumber() > sequenceNumber) {
+            index--;
+        }
+        packetBuffer.add(index, packet);
     }
 
     @Nullable
