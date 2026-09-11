@@ -41,6 +41,13 @@ public class AudioChannel extends Thread {
     private final OpusDecoder decoder;
     private long lastSequenceNumber;
     private long lostPackets;
+    /**
+     * Maximum number of lost frames reconstructed via Opus PLC/FEC in one go.
+     * Beyond this, PLC quality degrades into muffled/looped audio, so the gap is
+     * capped and the decoder resynchronized — resulting silence is smoother than
+     * playing distorted long-form PLC output.
+     */
+    private static final int MAX_PLC_FRAMES = 10;
 
     public AudioChannel(ClientVoicechat client, InitializationData initializationData, SoundManager soundManager, UUID uuid) {
         this.client = client;
@@ -148,19 +155,25 @@ public class AudioChannel extends Thread {
 
                 int packetsToCompensate = 0;
                 if (lastSequenceNumber >= 0) {
-                    packetsToCompensate = (int) (packet.getSequenceNumber() - (lastSequenceNumber + 1));
+                    int gap = (int) (packet.getSequenceNumber() - (lastSequenceNumber + 1));
 
-                    if (packetsToCompensate > 0) {
-                        lostPackets += packetsToCompensate;
-                    }
+                    if (gap > 0) {
+                        lostPackets += gap;
 
-                    if (packetsToCompensate > VoicechatClient.CLIENT_CONFIG.outputBufferSize.get()) {
-                        Voicechat.LOGGER.debug("Skipping compensation for {} packets", packetsToCompensate);
-                        packetsToCompensate = 0;
-                        decoder.resetState();
-                        flushRecording();
-                    } else if (packetsToCompensate > 0) {
-                        Voicechat.LOGGER.debug("Compensating {} packet(s) ", packetsToCompensate);
+                        if (gap > MAX_PLC_FRAMES) {
+                            // Large burst loss: cap the PLC reconstruction (long PLC
+                            // performance degrades into artifacts), resync the decoder
+                            // and drop the recording chunk so playback resumes cleanly.
+                            // The capped PLC frames coming out of a reset are near-silence,
+                            // which is far smoother than a hard cut or decaying loops.
+                            Voicechat.LOGGER.debug("Skipping compensation for {} packets", gap);
+                            packetsToCompensate = MAX_PLC_FRAMES;
+                            decoder.resetState();
+                            flushRecording();
+                        } else {
+                            packetsToCompensate = gap;
+                            Voicechat.LOGGER.debug("Compensating {} packet(s) ", packetsToCompensate);
+                        }
                     }
                 }
 

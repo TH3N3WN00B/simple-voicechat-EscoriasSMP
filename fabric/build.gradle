@@ -69,3 +69,15 @@ shadowJar {
     relocate 'io.github.jaredmdobson.concentus', 'de.maxhenkel.voicechat.concentus'
     exclude 'natives/*-x86/*'
 }
+
+// The mod-gradle-scripts uses a '-dev' classified jar as intermediate base for the shadowJar.
+// A standalone ':fabric:jar' run leaves that thin jar in build/libs - it has no shaded
+// dependencies (configbuilder, Concentus, ...) and crashes at runtime if installed by mistake.
+// Purge dev artifacts whenever the main build runs.
+tasks.named('assemble') {
+    doLast {
+        delete fileTree(layout.buildDirectory.dir('libs')) {
+            include '*dev*.jar'
+        }
+    }
+}

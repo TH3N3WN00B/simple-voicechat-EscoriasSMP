@@ -24,14 +24,18 @@ public class PacketRateLimiter {
     }
 
     public void onPlayerLoggedOut(ServerPlayer player) {
-        rateLimiters.remove(player.getUUID());
+        onPlayerLoggedOut(player.getUUID());
+    }
+
+    public void onPlayerLoggedOut(UUID playerUuid) {
+        rateLimiters.remove(playerUuid);
     }
 
     private static class RateLimiter {
         private final int threshold;
         private final long timePerTokenNanos;
-        private long lastLeakNanos;
-        private long amount;
+        private volatile long lastLeakNanos;
+        private volatile long amount;
 
         public RateLimiter(int threshold, long windowMillis) {
             this.threshold = threshold;
