@@ -10,6 +10,19 @@ import java.net.*;
 
 public class VoicechatSocketImpl extends VoicechatSocketBase implements VoicechatSocket {
 
+    /**
+     * 4 MiB kernel send/receive socket buffer.
+     * <p>
+     * With 20 players each sending 50 packets/sec, the server produces up to
+     * 20,000 outbound packets/sec.  Each Opus voice packet is ~200–1,300 bytes,
+     * so at 1 KB average the burst write rate peaks around 20 MB/s.  The default
+     * OS UDP send buffer of 64–128 KB saturates almost instantly, causing the
+     * kernel to silently drop datagrams.  4 MB absorbs at least 200 ms of burst
+     * traffic before a single packet is dropped, giving the sending thread time
+     * to catch up.
+     */
+    private static final int SOCKET_BUFFER_SIZE = 4 * 1024 * 1024; // 4 MiB
+
     @Nullable
     private DatagramSocket socket;
 
@@ -47,6 +60,38 @@ public class VoicechatSocketImpl extends VoicechatSocketBase implements Voicecha
                 System.exit(1);
             }
             throw e;
+        }
+
+        // ─── Increase kernel-side UDP socket buffers ───────────────────────────
+        // Prevents packet loss caused by socket buffer overflow when many players
+        // are simultaneously in voice range.  The OS may silently cap the value
+        // to the system maximum (net.core.rmem_max / net.core.wmem_max on Linux);
+        // we log the actual values so admins can tune the OS if needed.
+        applySockBuf(socket, SOCKET_BUFFER_SIZE);
+    }
+
+    /**
+     * Attempts to set SO_RCVBUF and SO_SNDBUF to {@code requestedSize}.
+     * Logs the actual values granted by the OS, which may be lower if the
+     * system maximum is smaller than the requested size.
+     */
+    private static void applySockBuf(DatagramSocket sock, int requestedSize) {
+        try {
+            sock.setReceiveBufferSize(requestedSize);
+            sock.setSendBufferSize(requestedSize);
+            int actualRcv = sock.getReceiveBufferSize();
+            int actualSnd = sock.getSendBufferSize();
+            if (actualRcv < requestedSize || actualSnd < requestedSize) {
+                Voicechat.LOGGER.warn(
+                        "UDP socket buffers capped by OS: requested={} KB, rcvbuf={} KB, sndbuf={} KB. "
+                        + "Consider increasing net.core.rmem_max / net.core.wmem_max on Linux.",
+                        requestedSize / 1024, actualRcv / 1024, actualSnd / 1024);
+            } else {
+                Voicechat.LOGGER.info("UDP socket buffers set to {} KB (rcv) / {} KB (snd)",
+                        actualRcv / 1024, actualSnd / 1024);
+            }
+        } catch (Exception e) {
+            Voicechat.LOGGER.warn("Failed to set UDP socket buffer size", e);
         }
     }
 

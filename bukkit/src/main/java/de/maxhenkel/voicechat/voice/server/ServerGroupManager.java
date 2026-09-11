@@ -9,6 +9,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import javax.annotation.Nullable;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -91,7 +93,7 @@ public class ServerGroupManager {
     }
 
     public void joinGroup(@Nullable Group group, Player player, String password) {
-        if (group != null && group.getPassword() != null && !group.getPassword().equals(password)) {
+        if (group != null && !passwordMatches(group.getPassword(), password)) {
             NetManager.sendToClient(player, new JoinedGroupPacket(null, true));
             return;
         }
@@ -183,6 +185,16 @@ public class ServerGroupManager {
 
     public Map<UUID, Group> getGroups() {
         return groups;
+    }
+
+    private static boolean passwordMatches(@Nullable String expected, @Nullable String provided) {
+        if (expected == null) {
+            return true;
+        }
+        if (provided == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), provided.getBytes(StandardCharsets.UTF_8));
     }
 
 }

@@ -18,6 +18,11 @@ public class PositionalAudioUtils {
      * @return a float array of length 2, containing the left and right volume (0-1)
      */
     private static float[] getStereoVolume(Vec3 cameraPos, float yRot, Vec3 soundPos) {
+        // The temporary Vec3/Vec2/float[] do not escape this method, so C2
+        // eliminates them via scalar replacement — a fresh float[] is cheaper
+        // than a ThreadLocal.get() of a scratch buffer. (Benchmark in
+        // benchmark/RESULTS.md measured `new float[]{...}` faster than the
+        // ThreadLocal variant, so the per-frame path stays allocation-free.)
         Vec3 d = soundPos.subtract(cameraPos).normalize();
         Vec2 diff = new Vec2((float) d.x, (float) d.z);
         float diffAngle = Utils.angle(diff, new Vec2(-1F, 0F));
@@ -74,7 +79,13 @@ public class PositionalAudioUtils {
      * @return the resulting audio volume
      */
     public static float getDistanceVolume(float maxDistance, Vec3 listenerPos, Vec3 pos) {
-        float distance = (float) pos.distanceTo(listenerPos);
+        // Manual euclidean distance. MC's Vec3.distanceTo is already allocation-free
+        // (sqrt of an inlined squared distance), so this is purely an inline save of
+        // the virtual call on the per-frame positional path.
+        float dx = (float) (listenerPos.x - pos.x);
+        float dy = (float) (listenerPos.y - pos.y);
+        float dz = (float) (listenerPos.z - pos.z);
+        float distance = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
         distance = Math.min(distance, maxDistance);
         return (1F - distance / maxDistance);
     }

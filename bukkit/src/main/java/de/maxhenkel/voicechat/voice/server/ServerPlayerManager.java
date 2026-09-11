@@ -5,57 +5,36 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.Plugin;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 
-public class ServerPlayerManager implements Listener {
+public class ServerPlayerManager {
 
-    private static final long REFRESH_INTERVAL_TICKS = 20L * 30L;
+    private static final long INDEX_REFRESH_INTERVAL_MS = 50L;
+    private static final double CELL_SIZE = 48D;
+    private static final double MAX_INDEXED_RANGE = CELL_SIZE * 4D;
 
     public static final ServerPlayerManager INSTANCE = new ServerPlayerManager();
 
     public static void init(Plugin plugin) {
-        if (!Voicechat.SERVER_CONFIG.threadedServerSupport.get()) {
-            return;
-        }
-        Bukkit.getPluginManager().registerEvents(ServerPlayerManager.INSTANCE, plugin);
-        Voicechat.compatibility.scheduleSyncRepeatingTask(INSTANCE::refresh, 0, REFRESH_INTERVAL_TICKS);
+        // The spatial index is refreshed lazily from the online player list on demand.
+        // Kept for API stability with upstream.
     }
 
-    private volatile Set<Player> players;
+    private volatile PlayerSpatialIndex index;
+    private final ReentrantLock indexLock = new ReentrantLock();
+    private volatile long lastIndexRefresh = 0L;
 
     private ServerPlayerManager() {
-        players = Collections.emptySet();
-    }
-
-    private synchronized void refresh() {
-        players = new HashSet<>(Bukkit.getOnlinePlayers());
-    }
-
-    @EventHandler
-    public synchronized void onPlayerJoin(PlayerJoinEvent event) {
-        Set<Player> newPlayers = new HashSet<>(players);
-        newPlayers.add(event.getPlayer());
-        players = newPlayers;
-    }
-
-    @EventHandler
-    public synchronized void onPlayerQuit(PlayerQuitEvent event) {
-        Set<Player> newPlayers = new HashSet<>(players);
-        newPlayers.remove(event.getPlayer());
-        players = newPlayers;
     }
 
     public static Collection<Player> getPlayersInRange(World level, Location pos, double range, @Nullable Predicate<Player> filter) {
@@ -66,8 +45,39 @@ public class ServerPlayerManager implements Listener {
         if (!Voicechat.SERVER_CONFIG.threadedServerSupport.get()) {
             return getPlayersInRangeDirect(world, pos, range, filter);
         }
+        if (range > MAX_INDEXED_RANGE) {
+            return getPlayersInRangeFromPlayerList(world, pos, range, filter);
+        }
+        PlayerSpatialIndex spatialIndex = refreshIndex();
         List<Player> nearbyPlayers = new ArrayList<>();
-        for (Player player : players) {
+        int radiusCells = (int) Math.floor(range / CELL_SIZE) + 1;
+        int centerCellX = (int) Math.floor(pos.getX() / CELL_SIZE);
+        int centerCellZ = (int) Math.floor(pos.getZ() / CELL_SIZE);
+        for (int dx = -radiusCells; dx <= radiusCells; dx++) {
+            for (int dz = -radiusCells; dz <= radiusCells; dz++) {
+                List<UUID> cellPlayers = spatialIndex.getCell(cellKey(centerCellX + dx, centerCellZ + dz));
+                if (cellPlayers == null) {
+                    continue;
+                }
+                for (int i = 0; i < cellPlayers.size(); i++) {
+                    Player player = Bukkit.getPlayer(cellPlayers.get(i));
+                    if (player == null || !world.equals(player.getWorld())) {
+                        continue;
+                    }
+                    if (isInRange(player.getLocation(), pos, range) && (filter == null || filter.test(player))) {
+                        nearbyPlayers.add(player);
+                    }
+                }
+            }
+        }
+        return nearbyPlayers;
+    }
+
+    private static Collection<Player> getPlayersInRangeFromPlayerList(World world, Location pos, double range, @Nullable Predicate<Player> filter) {
+        List<Player> nearbyPlayers = new ArrayList<>();
+        List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
+        for (int i = 0; i < players.size(); i++) {
+            Player player = players.get(i);
             if (!world.equals(player.getWorld())) {
                 continue;
             }
@@ -76,6 +86,46 @@ public class ServerPlayerManager implements Listener {
             }
         }
         return nearbyPlayers;
+    }
+
+    private PlayerSpatialIndex refreshIndex() {
+        PlayerSpatialIndex current = index;
+        long now = System.currentTimeMillis();
+        if (current != null && now - lastIndexRefresh < INDEX_REFRESH_INTERVAL_MS) {
+            return current;
+        }
+        if (!indexLock.tryLock()) {
+            return current;
+        }
+        try {
+            now = System.currentTimeMillis();
+            if (now - lastIndexRefresh < INDEX_REFRESH_INTERVAL_MS) {
+                return index;
+            }
+            lastIndexRefresh = now;
+            PlayerSpatialIndex newIndex = buildIndex();
+            index = newIndex;
+            return newIndex;
+        } finally {
+            indexLock.unlock();
+        }
+    }
+
+    private static PlayerSpatialIndex buildIndex() {
+        List<Player> players = new ArrayList<>(Bukkit.getOnlinePlayers());
+        Map<Long, List<UUID>> cells = new HashMap<>();
+        for (int i = 0; i < players.size(); i++) {
+            Player player = players.get(i);
+            Location location = player.getLocation();
+            int cellX = (int) Math.floor(location.getX() / CELL_SIZE);
+            int cellZ = (int) Math.floor(location.getZ() / CELL_SIZE);
+            cells.computeIfAbsent(cellKey(cellX, cellZ), k -> new ArrayList<>(4)).add(player.getUniqueId());
+        }
+        return new PlayerSpatialIndex(cells);
+    }
+
+    private static long cellKey(int cellX, int cellZ) {
+        return (((long) cellX) << 32) | (cellZ & 0xFFFFFFFFL);
     }
 
     private static Collection<Player> getPlayersInRangeDirect(World world, Location pos, double range, @Nullable Predicate<Player> filter) {
@@ -96,6 +146,20 @@ public class ServerPlayerManager implements Listener {
 
     private static double square(double value) {
         return value * value;
+    }
+
+    private static final class PlayerSpatialIndex {
+
+        private final Map<Long, List<UUID>> cells;
+
+        private PlayerSpatialIndex(Map<Long, List<UUID>> cells) {
+            this.cells = cells;
+        }
+
+        @Nullable
+        private List<UUID> getCell(long key) {
+            return cells.get(key);
+        }
     }
 
 }

@@ -17,6 +17,7 @@ public class ServerConfig {
     public ConfigEntry<Codec> voiceChatCodec;
     public ConfigEntry<Integer> voiceChatMtuSize;
     public ConfigEntry<Integer> tcpRateLimit;
+    public ConfigEntry<Integer> udpRateLimit;
     public ConfigEntry<Integer> keepAlive;
     public ConfigEntry<Boolean> groupsEnabled;
     public ConfigEntry<String> voiceHost;
@@ -73,6 +74,12 @@ public class ServerConfig {
                         "Set this to -1 to disable the rate limit - This must be greater than 0 in all other cases",
                         "This only applies to voice chat packets that are sent through Minecrafts networking",
                         "This affects actions like opening/joining/leaving voice chat groups or general state changes like disabling/enabling the voice chat"
+                );
+        udpRateLimit = builder
+                .integerEntry("udp_rate_limit", 200, -1, 4096,
+                        "The maximum number of authenticated UDP voice packets a player can send per second",
+                        "Set this to -1 to disable the rate limit - This must be greater than 0 in all other cases",
+                        "This applies to voice audio and keep-alive packets, preventing authenticated UDP floods"
                 );
         keepAlive = builder
                 .integerEntry("keep_alive", 1000, 1000, Integer.MAX_VALUE,

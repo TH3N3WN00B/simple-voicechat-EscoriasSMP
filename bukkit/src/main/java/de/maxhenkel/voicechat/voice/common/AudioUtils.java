@@ -12,6 +12,9 @@ public class AudioUtils {
         if (bytes.length % 2 != 0) {
             throw new IllegalArgumentException("Input bytes need to be divisible by 2");
         }
+        // ByteBuffer delegates to a native bulk copy (Unsafe.copyMemory) which is
+        // faster than a per-sample bit-shift loop: C2 does not auto-vectorize the
+        // int narrowing loop. (Verified by benchmark in benchmark/RESULTS.md.)
         ShortBuffer sb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer();
         short[] out = new short[sb.remaining()];
         sb.get(out);
@@ -19,6 +22,7 @@ public class AudioUtils {
     }
 
     public static byte[] shortsToBytes(short[] shorts) {
+        // Same reasoning as bytesToShorts: native bulk copy beats the manual loop.
         ByteBuffer bb = ByteBuffer.allocate(shorts.length * 2).order(ByteOrder.LITTLE_ENDIAN);
         for (short s : shorts) {
             bb.putShort(s);

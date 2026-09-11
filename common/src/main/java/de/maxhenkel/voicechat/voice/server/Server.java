@@ -7,6 +7,7 @@ import de.maxhenkel.voicechat.api.events.SoundPacketEvent;
 import de.maxhenkel.voicechat.debug.CooldownTimer;
 import de.maxhenkel.voicechat.debug.VoicechatUncaughtExceptionHandler;
 import de.maxhenkel.voicechat.intercompatibility.CommonCompatibilityManager;
+import de.maxhenkel.voicechat.net.PacketRateLimiter;
 import de.maxhenkel.voicechat.permission.PermissionManager;
 import de.maxhenkel.voicechat.plugins.PluginManager;
 import de.maxhenkel.voicechat.voice.common.*;
@@ -15,6 +16,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.dedicated.DedicatedServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 import java.net.InetAddress;
@@ -29,6 +31,9 @@ import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 public class Server extends Thread {
@@ -44,11 +49,25 @@ public class Server extends Thread {
     private VoicechatSocket socket;
     private final ProcessThread processThread;
     private final BlockingQueue<RawUdpPacket> packetQueue;
+    private final PacketRateLimiter udpRateLimiter;
     private final PingManager pingManager;
     private final PlayerStateManager playerStateManager;
     private final ServerGroupManager groupManager;
     private final ServerCategoryManager categoryManager;
     private final Set<UUID> announceModePlayers;
+    /**
+     * Dedicated thread pool for outbound UDP sends.
+     * <p>
+     * With 20 players in range, one mic packet can require up to 19 outbound
+     * DatagramSocket.send() calls.  Each call can block briefly on the kernel.
+     * Running these from the single {@code ProcessThread} means it blocks on I/O
+     * instead of processing new incoming packets, causing the queue to fill up
+     * and triggering the TTL-exceeded warning.
+     * <p>
+     * Using a fixed pool of 4 threads distributes the I/O load across cores and
+     * lets {@code ProcessThread} immediately proceed to the next incoming packet.
+     */
+    private final ExecutorService sendExecutor;
 
     public Server(MinecraftServer server) {
         dedicated = server instanceof DedicatedServer;
@@ -70,11 +89,19 @@ public class Server extends Thread {
         connectionIndex = new ConcurrentHashMap<>();
         secrets = new ConcurrentHashMap<>();
         packetQueue = new ArrayBlockingQueue<>(PACKET_QUEUE_CAPACITY);
+        udpRateLimiter = new PacketRateLimiter(Voicechat.SERVER_CONFIG.udpRateLimit.get());
         pingManager = new PingManager(this);
         playerStateManager = new PlayerStateManager(this);
         groupManager = new ServerGroupManager(this);
         categoryManager = new ServerCategoryManager(this);
         announceModePlayers = ConcurrentHashMap.newKeySet();
+        sendExecutor = Executors.newFixedThreadPool(4,
+                r -> {
+                    Thread t = new Thread(r, "VoiceChatSendThread");
+                    t.setDaemon(true);
+                    t.setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
+                    return t;
+                });
         setDaemon(true);
         setName("VoiceChatServerThread");
         setUncaughtExceptionHandler(new VoicechatUncaughtExceptionHandler());
@@ -233,6 +260,7 @@ public class Server extends Thread {
     public void disconnectClient(UUID playerUUID) {
         removeConnection(playerUUID);
         secrets.remove(playerUUID);
+        udpRateLimiter.onPlayerLoggedOut(playerUUID);
         PluginManager.instance().onPlayerDisconnected(playerUUID);
     }
 
@@ -250,6 +278,15 @@ public class Server extends Thread {
     public void close() {
         socket.close();
         processThread.close();
+        sendExecutor.shutdown();
+        try {
+            if (!sendExecutor.awaitTermination(1L, TimeUnit.SECONDS)) {
+                sendExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            sendExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
 
         PluginManager.instance().onServerStopped();
     }
@@ -352,6 +389,10 @@ public class Server extends Thread {
 
                     ClientConnection conn = getSender(message);
                     if (conn == null) {
+                        continue;
+                    }
+
+                    if (!udpRateLimiter.allow(conn.getPlayerUUID())) {
                         continue;
                     }
 
@@ -518,7 +559,40 @@ public class Server extends Thread {
             });
             return;
         }
+        if (!isAudibleFor(sender, receiver, soundPacket)) {
+            // Early proximity filter: the receiver is beyond the effective range of
+            // the position-based sound (e.g. inside the broadcast range but outside
+            // the audible distance). Skipping avoids serializing, encrypting and
+            // dispatching a 0-volume frame over UDP for every inaudible receiver.
+            return;
+        }
         sendPacket(soundPacket, connection);
+    }
+
+    /**
+     * Returns whether {@code receiver} could actually hear {@code soundPacket}
+     * given its position and effective range. Non-positional packets (group,
+     * announcement) are always audible and return {@code true}.
+     */
+    private static boolean isAudibleFor(@Nullable ServerPlayer sender, ServerPlayer receiver, SoundPacket<?> soundPacket) {
+        if (soundPacket instanceof PlayerSoundPacket playerSoundPacket) {
+            if (sender == null) {
+                return true;
+            }
+            return withinRadiusSquared(sender.position(), receiver.position(), playerSoundPacket.getDistance());
+        } else if (soundPacket instanceof LocationSoundPacket locationSoundPacket) {
+            return withinRadiusSquared(locationSoundPacket.getLocation(), receiver.position(), locationSoundPacket.getDistance());
+        }
+        return true;
+    }
+
+    private static boolean withinRadiusSquared(Vec3 a, Vec3 b, float radius) {
+        // Allocation-free squared distance — Vec3.distanceToSqr would allocate a
+        // temporary subtraction result per receiver.
+        double dx = a.x - b.x;
+        double dy = a.y - b.y;
+        double dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz <= (double) radius * radius;
     }
 
     public double getBroadcastRange(float minRange) {
@@ -628,24 +702,39 @@ public class Server extends Thread {
     }
 
     /**
-     * Sends the packet and handles potential errors.
+     * Asynchronously serializes and sends {@code packet} to {@code connection}.
+     * <p>
+     * Serialization (Netty buffer allocation + AES-GCM encrypt) and the
+     * blocking {@code DatagramSocket.send()} call are both offloaded to
+     * {@link #sendExecutor}, so {@code ProcessThread} is never stalled waiting
+     * for kernel I/O while 20 players are being served simultaneously.
      *
      * @param packet     the packet to send
      * @param connection the connection to send the packet to
-     * @return if the packet was sent successfully
+     * @return {@code true} — submission to the executor always succeeds unless the
+     *         server is shutting down, in which case the packet is silently dropped
      */
     public boolean sendPacket(Packet<?> packet, ClientConnection connection) {
+        NetworkMessage message = new NetworkMessage(packet);
         try {
-            sendPacketRaw(packet, connection);
-            return true;
-        } catch (Exception e) {
-            Voicechat.LOGGER.error("Failed to send voice chat packet to {}", connection.getPlayerUUID());
-            return false;
+            sendExecutor.execute(() -> {
+                try {
+                    connection.send(this, message);
+                } catch (Exception e) {
+                    Voicechat.LOGGER.error("Failed to send voice chat packet to {}", connection.getPlayerUUID());
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // Server is shutting down — silently drop the packet
         }
+        return true;
     }
 
     /**
-     * Sends the packet. You must handle potential errors
+     * Sends the packet synchronously. Callers must handle potential errors.
+     * <p>
+     * Prefer {@link #sendPacket} for normal usage; use this only when the caller
+     * needs guaranteed delivery ordering or is already running off the main thread.
      *
      * @param packet     the packet to send
      * @param connection the connection to send the packet to
