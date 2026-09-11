@@ -34,4 +34,5 @@ sourceSets.main.java {
 }
 
 compileJava.dependsOn generateJava
+compileJava.dependsOn project(':common-proxy').tasks.named('shadowJar')
 build.dependsOn shadowJar
